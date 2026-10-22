@@ -6,7 +6,7 @@ import pyodbc
 
 ### DEFINICION DE CONEXIONES A MONGO DB ###
 MONGO_URI ='mongodb://localhost:27017/'
-LOGS_DB ='SystemLogsDb'
+LOGS_DB ='SystemLogDb'
 MONGO_COLLECTION ='AuditLogs'
 
 SQL_SERVER ='localhost,1433'
@@ -54,7 +54,7 @@ def exec_etl():
 
     ts ='Timestamp_original'
     
-    df_fecha[ts] = pd.to_datetime(df_crudo['Timestamp'])
+    df_fecha[ts] = pd.to_datetime(df_crudo['timestamp'])
     df_fecha["Id_Fecha"] =df_fecha[ts].dt.strftime('%Y%m%d')
     df_fecha['Anio'] = df_fecha[ts].dt.year
     df_fecha['Mes'] = df_fecha[ts].dt.month
@@ -65,14 +65,14 @@ def exec_etl():
     df_fecha = df_fecha.drop_duplicates(subset=['Id_Fecha'])
 
     ## dimension request
-    df_crudo = df_crudo.columns.str.replace('.', '_')
+    
 
     df_request = pd.DataFrame()
 
-    df_request['Method'] = df_crudo['Request_Method'].fillna('Desconocido')
-    df_request['Path'] = df_crudo['Request_Path'].fillna('/')
-    df_request['QueryString'] = df_crudo['Request_QueryString'].fillna('')
-    df_request['Payload'] = df_crudo['Request_Payload'].fillna('')
+    df_request['Method'] = df_crudo['request_Method'].fillna('Desconocido')
+    df_request['Path'] = df_crudo['request_Path'].fillna('/')
+    df_request['QueryString'] = df_crudo['request_QueryString'].fillna('')
+    df_request['Payload'] = df_crudo['request_Payload'].fillna('')
     ## llave para metodo y la ruta
     df_request['Id_Request'] = df_request.apply(lambda row: hashlib.md5((row['Method'] + row['Path']).encode()).hexdigest()[:10], axis=1)
 
@@ -83,18 +83,18 @@ def exec_etl():
 
     df_response = pd.DataFrame()
 
-    df_response['StatusCode'] = df_crudo['Response_StatusCode'].fillna(0)
-    df_response['StatusText'] = df_crudo['Response_Status'].fillna('')
-    df_response['Id_Response'] = df_crudo['Response_StatusCode']
+    df_response['StatusCode'] = df_crudo['response_StatusCode'].fillna(0)
+    df_response['StatusText'] = df_crudo['response_Status'].fillna('')
+    df_response['Id_Response'] = df_crudo['response_StatusCode']
 
     df_response = df_response.drop_duplicates(subset=['Id_Response'])
 
     ## dimension excepcion
     df_excepcion = pd.DataFrame()
 
-    df_excepcion['Message'] = df_crudo['Excepcion_Message'].fillna('No Hay Excepcion') if 'Exception_Message' in df_crudo.columns else 'No Hay Excepcion'
-    df_excepcion['StackTrace'] = df_crudo['Excepcion_StackTrace'].fillna('N/A') if 'Exception_Message' in df_crudo.columns else 'N/A'
-    df_excepcion['Source'] = df_crudo['Exception_Source'].fillna('N/A') if 'Exception_Source' in df_crudo.columns else 'N/A'
+    df_excepcion['Message'] = df_crudo['exception_Message'].fillna('No Hay Excepcion') if 'exception_Message' in df_crudo.columns else 'No Hay Excepcion'
+    df_excepcion['StackTrace'] = df_crudo['exception_StackTrace'].fillna('N/A') if 'exception_StackTrace' in df_crudo.columns else 'N/A'
+    df_excepcion['Source'] = df_crudo['exception_Source'].fillna('N/A') if 'exception_Source' in df_crudo.columns else 'N/A'
 
     df_excepcion['Id_Excepcion'] = df_excepcion.apply(lambda r: hashlib.md5(f"{r['Message']}".encode()).hexdigest()[:10], axis=1)
     df_excepcion = df_excepcion.drop_duplicates(subset=['Id_Excepcion'])
@@ -103,23 +103,23 @@ def exec_etl():
     ### hecho
 
     df_hechos = pd.DataFrame()
-    df_hechos['TraceId'] = df_crudo['TraceId']
-    df_hechos['Level'] = df_crudo['Level'].fillna('Information')
-    df_hechos['Environment'] = df_crudo['Environment'].fillna('Development')
-    df_hechos['ClientIp'] = df_crudo['ClientIp'].fillna(df_crudo.get('Ip', '127.0.0.1'))
-    df_hechos['UserId'] = df_crudo['UserId'].fillna('Anonymous')
-    df_hechos['UserName'] = df_crudo['UserName'].fillna('Anonymous')
-    df_hechos['Rol'] = df_crudo['Rol'].fillna('None')
-    df_hechos['Device'] = df_crudo['Device'].fillna('Unknown')
+    df_hechos['TraceId'] = df_crudo['traceId']
+    df_hechos['Level'] = df_crudo['level'].fillna('Information')
+    df_hechos['Environment'] = df_crudo['environment'].fillna('Development')
+    df_hechos['ClientIp'] = df_crudo['clientIp'].fillna(df_crudo.get('Ip', '127.0.0.1'))
+    df_hechos['UserId'] = df_crudo['userId'].fillna('Anonymous')
+    df_hechos['UserName'] = df_crudo['userName'].fillna('Anonymous')
+    df_hechos['Rol'] = df_crudo['rol'].fillna('None')
+    df_hechos['Device'] = df_crudo['device'].fillna('Unknown')
 
     # relaciones de las dimensiones que ya habiamos hecho
-    df_hechos['Id_Fecha'] = pd.to_datetime(df_crudo['Timestamp']).dt.strftime('%Y%m%d')
-    df_hechos['Id_Request'] = df_crudo.apply(lambda r: hashlib.md5(f"{r['Request_Method']}-{r['Request_Path']}".encode()).hexdigest()[:10], axis=1)
-    df_hechos['Id_Response'] = df_crudo['Response_StatusCode'].fillna(200).astype(int)
-    df_hechos['Id_Excepcion'] = df_crudo.apply(lambda r: hashlib.md5(f"{str(r.get('Exception_Message', 'No Exception'))}".encode()).hexdigest()[:10], axis=1)
+    df_hechos['Id_Fecha'] = pd.to_datetime(df_crudo['timestamp']).dt.strftime('%Y%m%d')
+    df_hechos['Id_Request'] = df_crudo.apply(lambda r: hashlib.md5(f"{r['request_Method']}-{r['request_Path']}".encode()).hexdigest()[:10], axis=1)
+    df_hechos['Id_Response'] = df_crudo['response_StatusCode'].fillna(200).astype(int)
+    df_hechos['Id_Excepcion'] = df_crudo.apply(lambda r: hashlib.md5(f"{str(r.get('exception_Message', 'No Exception'))}".encode()).hexdigest()[:10], axis=1)
     
     # Métrica de rendimiento numérico extraída del ResponseDetail de C#
-    df_hechos['ElapsedMilliseconds'] = pd.to_numeric(df_crudo['Response_ElapsedMilliseconds']).fillna(0).astype(int)
+    df_hechos['ElapsedMilliseconds'] = pd.to_numeric(df_crudo['response_ElapsedMilliseconds']).fillna(0).astype(int)
 
     ## ------------------------
     ## CARGA
@@ -141,22 +141,28 @@ def exec_etl():
         if df.empty:
             return
         
-        # creamos una tabla en memoria para simular el staging
-        df.to_sql(f"#{destino}", con=conn, if_exists='replace', index=False)
+          
+        staging_tabla = f"Staging_{destino}"
+        df.to_sql(staging_tabla, con=engine, if_exists='replace', index=False)
 
-        #mapeamos
+        
         columnas = ", ".join(df.columns)
         valores_source = ", ".join([f"source.{col}" for col in df.columns])
-        actualizar_sets = ", ".join([f"target.{col}" for col in df.columns if col != pk])
+        
+        
+        columnas_a_actualizar = [f"target.{col} = source.{col}" for col in df.columns if col != pk]
+        actualizar_sets = ", ".join(columnas_a_actualizar)
 
-        ## ejecutamos la query
+        if(actualizar_sets):
+            match_clause = f"WHEN MATCHED THEN UPDATE SET {actualizar_sets}"
+        else:
+            match_clause = ""
 
-        merge_query = f"""
-        MERGE {destino} AS target
-        USING #{destino} AS source
-        ON target.{pk} = source.{pk}
-        WHEN MATCHED THEN 
-            UPDATE SET {actualizar_sets}
+        merge_query =f"""
+        MERGE {destino} AS TARGET
+        USING {staging_tabla} AS SOURCE
+        ON TARGET.{pk} = SOURCE.{pk}
+        {match_clause}
         WHEN NOT MATCHED THEN 
             INSERT ({columnas}) VALUES ({valores_source});
         """
@@ -174,12 +180,12 @@ def exec_etl():
 
     #al igual que las dimensiones usamos una tabla temporal
     if not df_hechos.empty:
-        df_hechos.to_sql("#Fact_ApiLogs", con=engine, if_exists='replace', index=False)
+        df_hechos.to_sql("Fact_ApiLogs", con=engine, if_exists='replace', index=False)
         
         insert_hechos_query = """
         INSERT INTO Fact_ApiLogs (TraceId, Level, Environment, ClientIp, UserId, UserName, Rol, Device, ID_Fecha, ID_Request, ID_Response, ID_Excepcion, ElapsedMilliseconds)
         SELECT source.TraceId, source.Level, source.Environment, source.ClientIp, source.UserId, source.UserName, source.Rol, source.Device, source.ID_Fecha, source.ID_Request, source.ID_Response, source.ID_Excepcion, source.ElapsedMilliseconds
-        FROM #Fact_ApiLogs AS source
+        FROM Fact_ApiLogs AS source
         WHERE NOT EXISTS (
             SELECT 1 FROM Fact_ApiLogs AS target WHERE target.TraceId = source.TraceId
         );
@@ -195,8 +201,8 @@ def exec_etl():
     print("ETL finalizado")
 
 
-    if __name__ is "__main__":
-        exec_etl()
+if __name__ == "__main__":
+    exec_etl()
         
 
 
