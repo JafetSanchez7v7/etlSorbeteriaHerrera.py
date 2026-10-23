@@ -1,0 +1,10 @@
+services:
+  etl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: etl_container
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

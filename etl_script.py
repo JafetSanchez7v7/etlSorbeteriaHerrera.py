@@ -1,18 +1,23 @@
 import hashlib
+import os
 import pandas as pd 
+from dotenv import load_dotenv
 from pymongo import MongoClient
 from sqlalchemy import create_engine
 import pyodbc
 
-### DEFINICION DE CONEXIONES A MONGO DB ###
-MONGO_URI ='mongodb://localhost:27017/'
-LOGS_DB ='SystemLogDb'
-MONGO_COLLECTION ='AuditLogs'
 
-SQL_SERVER ='localhost,1433'
-SQL_DATABASE ='HerreraSystemLogs_DW'
-SQL_USER = "sa"
-SQL_PASSWORD = "Jafet0330R"
+load_dotenv()
+
+### DEFINICION DE CONEXIONES A MONGO DB ###
+MONGO_URI = os.environ['MONGO_URI']
+LOGS_DB = os.environ['LOGS_DB']
+MONGO_COLLECTION =os.environ['MONGO_COLLECTION']
+
+SQL_SERVER =os.environ['SQL_SERVER']
+SQL_DATABASE =os.environ['SQL_DATABASE']
+SQL_USER = os.environ['SQL_USER']
+SQL_PASSWORD = os.environ['SQL_PASSWORD']
 
 ### ETL PROCCESS
 
@@ -74,7 +79,7 @@ def exec_etl():
     df_request['QueryString'] = df_crudo['request_QueryString'].fillna('')
     df_request['Payload'] = df_crudo['request_Payload'].fillna('')
     ## llave para metodo y la ruta
-    df_request['Id_Request'] = df_request.apply(lambda row: hashlib.md5((row['Method'] + row['Path']).encode()).hexdigest()[:10], axis=1)
+    df_request['Id_Request'] = df_crudo.apply(lambda r: hashlib.md5(f"{r['request_Method']}-{r['request_Path']}".encode()).hexdigest()[:10], axis=1)
 
     df_request = df_request.drop_duplicates(subset=['Id_Request'])
 
@@ -116,9 +121,9 @@ def exec_etl():
     df_hechos['Id_Fecha'] = pd.to_datetime(df_crudo['timestamp']).dt.strftime('%Y%m%d')
     df_hechos['Id_Request'] = df_crudo.apply(lambda r: hashlib.md5(f"{r['request_Method']}-{r['request_Path']}".encode()).hexdigest()[:10], axis=1)
     df_hechos['Id_Response'] = df_crudo['response_StatusCode'].fillna(200).astype(int)
-    df_hechos['Id_Excepcion'] = df_crudo.apply(lambda r: hashlib.md5(f"{str(r.get('exception_Message', 'No Exception'))}".encode()).hexdigest()[:10], axis=1)
+    df_hechos['Id_Excepcion'] = df_crudo.apply(lambda r: hashlib.md5(f"{str(r.get('exception_Message', 'No Hay Excepcion'))}".encode()).hexdigest()[:10], axis=1)
     
-    # Métrica de rendimiento numérico extraída del ResponseDetail de C#
+    # Métrica de rendimiento numérico extraída del ResponseDetail 
     df_hechos['ElapsedMilliseconds'] = pd.to_numeric(df_crudo['response_ElapsedMilliseconds']).fillna(0).astype(int)
 
     ## ------------------------
@@ -127,11 +132,32 @@ def exec_etl():
 
     print("realizando carga de dimensiones y hechos")
 
-    ## driver
-    engine_str = f"mssql+pyodbc://{SQL_USER}:{SQL_PASSWORD}@{SQL_SERVER}/{SQL_DATABASE}?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes"
-    engine = create_engine(engine_str)
+    #conexion sql server
+    from sqlalchemy.engine import URL
 
-    conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={SQL_SERVER};DATABASE={SQL_DATABASE};UID={SQL_USER};PWD={SQL_PASSWORD};TrustServerCertificate=yes;"
+    host,port = SQL_SERVER.split(',',1)
+
+    connection_url = URL.create(
+        "mssql+pyodbc",
+        username=SQL_USER,
+        password=SQL_PASSWORD,
+        host=host,
+        port=int(port),
+        database=SQL_DATABASE,
+        query={"driver": "ODBC Driver 17 for SQL Server", "TrustServerCertificate": "yes"}
+    )
+
+    engine = create_engine(connection_url)
+
+    conn_str = (
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        f"SERVER={SQL_SERVER};"
+        f"DATABASE={SQL_DATABASE};"
+        f"UID={SQL_USER};"
+        f"PWD={SQL_PASSWORD};"
+        "TrustServerCertificate=yes;"
+    )
+    
     conn = pyodbc.connect(conn_str)
     cursor = conn.cursor()
 
@@ -178,18 +204,36 @@ def exec_etl():
 
     # INSERTAMOS LA TABLA DE HECHOS VALIDANDO QUE NO SE DUPLIQUE
 
-    #al igual que las dimensiones usamos una tabla temporal
+    #al igual que las dimensiones usamos una tabla staging
     if not df_hechos.empty:
-        df_hechos.to_sql("Fact_ApiLogs", con=engine, if_exists='replace', index=False)
-        
+        df_hechos.to_sql(
+            "Staging_Fact_ApiLogs",
+            con=engine,
+            if_exists="replace",
+            index=False
+        )
+
         insert_hechos_query = """
-        INSERT INTO Fact_ApiLogs (TraceId, Level, Environment, ClientIp, UserId, UserName, Rol, Device, ID_Fecha, ID_Request, ID_Response, ID_Excepcion, ElapsedMilliseconds)
-        SELECT source.TraceId, source.Level, source.Environment, source.ClientIp, source.UserId, source.UserName, source.Rol, source.Device, source.ID_Fecha, source.ID_Request, source.ID_Response, source.ID_Excepcion, source.ElapsedMilliseconds
-        FROM Fact_ApiLogs AS source
-        WHERE NOT EXISTS (
-            SELECT 1 FROM Fact_ApiLogs AS target WHERE target.TraceId = source.TraceId
-        );
+            INSERT INTO Fact_ApiLogs (
+                TraceId, Level, Environment, ClientIp,
+                UserId, UserName, Rol, Device,
+                Id_Fecha, Id_Request, Id_Response,
+                Id_Excepcion, ElapsedMilliseconds
+            )
+            SELECT
+                source.TraceId, source.Level, source.Environment,
+                source.ClientIp, source.UserId, source.UserName,
+                source.Rol, source.Device, source.Id_Fecha,
+                source.Id_Request, source.Id_Response,
+                source.Id_Excepcion, source.ElapsedMilliseconds
+            FROM Staging_Fact_ApiLogs AS source
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM Fact_ApiLogs AS target
+                WHERE target.TraceId = source.TraceId
+            );
         """
+
         cursor.execute(insert_hechos_query)
         conn.commit()
 
