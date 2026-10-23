@@ -19,6 +19,17 @@ SQL_DATABASE =os.environ['SQL_DATABASE']
 SQL_USER = os.environ['SQL_USER']
 SQL_PASSWORD = os.environ['SQL_PASSWORD']
 
+
+def generar_id_excepcion(mensaje):
+    if pd.isna(mensaje) or not str(mensaje).strip():
+        mensaje = "No Hay Excepcion"
+
+    mensaje = str(mensaje).strip()
+
+    return hashlib.md5(
+        mensaje.encode("utf-8")
+    ).hexdigest()[:10]
+
 ### ETL PROCCESS
 
 def exec_etl():
@@ -88,7 +99,7 @@ def exec_etl():
 
     df_response = pd.DataFrame()
 
-    df_response['StatusCode'] = df_crudo['response_StatusCode'].fillna(0)
+    df_response['StatusCode'] = df_crudo['response_StatusCode'].fillna(200)
     df_response['StatusText'] = df_crudo['response_Status'].fillna('')
     df_response['Id_Response'] = df_crudo['response_StatusCode']
 
@@ -101,7 +112,7 @@ def exec_etl():
     df_excepcion['StackTrace'] = df_crudo['exception_StackTrace'].fillna('N/A') if 'exception_StackTrace' in df_crudo.columns else 'N/A'
     df_excepcion['Source'] = df_crudo['exception_Source'].fillna('N/A') if 'exception_Source' in df_crudo.columns else 'N/A'
 
-    df_excepcion['Id_Excepcion'] = df_excepcion.apply(lambda r: hashlib.md5(f"{r['Message']}".encode()).hexdigest()[:10], axis=1)
+    df_excepcion['Id_Excepcion'] = df_excepcion['Message'].apply(generar_id_excepcion)
     df_excepcion = df_excepcion.drop_duplicates(subset=['Id_Excepcion'])
     
 
@@ -121,8 +132,15 @@ def exec_etl():
     df_hechos['Id_Fecha'] = pd.to_datetime(df_crudo['timestamp']).dt.strftime('%Y%m%d')
     df_hechos['Id_Request'] = df_crudo.apply(lambda r: hashlib.md5(f"{r['request_Method']}-{r['request_Path']}".encode()).hexdigest()[:10], axis=1)
     df_hechos['Id_Response'] = df_crudo['response_StatusCode'].fillna(200).astype(int)
-    df_hechos['Id_Excepcion'] = df_crudo.apply(lambda r: hashlib.md5(f"{str(r.get('exception_Message', 'No Hay Excepcion'))}".encode()).hexdigest()[:10], axis=1)
-    
+
+    mensajes = (
+    df_crudo['exception_Message']
+    if 'exception_Message' in df_crudo.columns
+    else pd.Series('No Hay Excepcion', index=df_crudo.index)
+    )
+    df_hechos['Id_Excepcion'] = mensajes.apply(
+        generar_id_excepcion
+    )
     # Métrica de rendimiento numérico extraída del ResponseDetail 
     df_hechos['ElapsedMilliseconds'] = pd.to_numeric(df_crudo['response_ElapsedMilliseconds']).fillna(0).astype(int)
 
@@ -160,6 +178,7 @@ def exec_etl():
     
     conn = pyodbc.connect(conn_str)
     cursor = conn.cursor()
+
 
     ## funcion interna para cargar las dimensiones
 
