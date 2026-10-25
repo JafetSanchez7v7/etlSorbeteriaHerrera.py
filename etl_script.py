@@ -90,7 +90,7 @@ def exec_etl():
     df_request['QueryString'] = df_crudo['request_QueryString'].fillna('')
     df_request['Payload'] = df_crudo['request_Payload'].fillna('')
     ## llave para metodo y la ruta
-    df_request['Id_Request'] = df_crudo.apply(lambda r: hashlib.md5(f"{r['request_Method']}-{r['request_Path']}".encode()).hexdigest()[:10], axis=1)
+    df_request['Id_Request'] = df_crudo.apply(lambda r: hashlib.md5(f"{r['request_Method']}-{r['request_Path']}-{r['request_Payload']}".encode()).hexdigest()[:10], axis=1)
 
     df_request = df_request.drop_duplicates(subset=['Id_Request'])
 
@@ -130,7 +130,7 @@ def exec_etl():
 
     # relaciones de las dimensiones que ya habiamos hecho
     df_hechos['Id_Fecha'] = pd.to_datetime(df_crudo['timestamp']).dt.strftime('%Y%m%d')
-    df_hechos['Id_Request'] = df_crudo.apply(lambda r: hashlib.md5(f"{r['request_Method']}-{r['request_Path']}".encode()).hexdigest()[:10], axis=1)
+    df_hechos['Id_Request'] = df_request['Id_Request']
     df_hechos['Id_Response'] = df_crudo['response_StatusCode'].fillna(200).astype(int)
 
     mensajes = (
